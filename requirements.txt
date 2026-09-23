@@ -8,3 +8,8 @@ langchain-community
 langchain-google-genai
 langchain-text-splitters
 chromadb
+sqlalchemy
+psycopg2-binary
+rank-bm25
+pytest
+httpx
