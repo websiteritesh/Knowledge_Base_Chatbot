@@ -99,11 +99,11 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-app.mount("/static", StaticFiles(directory="../frontend"), name="static")
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 @app.get("/app")
 def serve_frontend():
-    return FileResponse("../frontend/index.html")
+    return FileResponse("frontend/index.html")
 
 @app.post("/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
