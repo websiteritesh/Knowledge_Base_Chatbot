@@ -13,3 +13,6 @@ psycopg2-binary
 rank-bm25
 pytest
 httpx
+python-jose[cryptography]
+bcrypt
+python-multipart

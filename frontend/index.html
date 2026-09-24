@@ -312,7 +312,9 @@
     </div>
 
 <script>
-    const API = "http://127.0.0.1:8000";
+    // Relative address: works whether this runs on localhost, Codespaces, or a real deployed URL —
+    // it always means "the same server this page was loaded from."
+    const API = "";
 
     function getToken() { return localStorage.getItem("token"); }
     function showApp() { document.getElementById("loginOverlay").style.display = "none"; }

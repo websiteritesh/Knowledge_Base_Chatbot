@@ -70,7 +70,12 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALGORITHM = "HS256"
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME")
-ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH")
+import base64
+
+# Stored as Base64 in .env to avoid Docker Compose mangling the $ characters
+# that are a normal part of bcrypt hash format.
+_hash_b64 = os.getenv("ADMIN_PASSWORD_HASH_B64")
+ADMIN_PASSWORD_HASH = base64.b64decode(_hash_b64).decode() if _hash_b64 else None
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
