@@ -88,3 +88,6 @@ pytest -v
 4. Those chunks are sent to Gemini as context, with instructions to answer only from them
 5. If the documents don't contain the answer, a second AI call answers from general knowledge instead — clearly labeled as such
 6. The question and answer are saved to PostgreSQL
+
+
+
