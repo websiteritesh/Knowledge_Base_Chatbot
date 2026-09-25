@@ -43,3 +43,4 @@ jobs:
           ADMIN_PASSWORD_HASH_B64: ${{ secrets.ADMIN_PASSWORD_HASH_B64 }}
           TEST_ADMIN_PASSWORD: ${{ secrets.TEST_ADMIN_PASSWORD }}
         run: pytest -v
+
