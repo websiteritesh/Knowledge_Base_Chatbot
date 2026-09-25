@@ -12,28 +12,46 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      # Step 2: set up Python
+      # Step 2: check every secret is actually present BEFORE doing anything else.
+      # If any is missing, THIS step turns red and stops everything else from running,
+      # so there's only one place to look.
+      - name: Check all secrets are set
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+          ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
+          ADMIN_PASSWORD_HASH_B64: ${{ secrets.ADMIN_PASSWORD_HASH_B64 }}
+          TEST_ADMIN_PASSWORD: ${{ secrets.TEST_ADMIN_PASSWORD }}
+        run: |
+          missing=0
+          for var in GEMINI_API_KEY DATABASE_URL SECRET_KEY ADMIN_USERNAME ADMIN_PASSWORD_HASH_B64 TEST_ADMIN_PASSWORD; do
+            value="${!var}"
+            if [ -z "$value" ]; then
+              echo "MISSING: $var is empty or not set"
+              missing=1
+            else
+              echo "OK: $var is set (${#value} characters)"
+            fi
+          done
+          if [ "$missing" = "1" ]; then
+            echo ""
+            echo "One or more secrets are missing. Add/fix them in:"
+            echo "Settings -> Secrets and variables -> Actions"
+            exit 1
+          fi
+
+      # Step 3: set up Python
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # Step 3: install dependencies
+      # Step 4: install dependencies
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # Step 4: run the tests, with secrets injected as environment variables
-      # (these are configured in GitHub repo Settings -> Secrets and variables -> Actions)
-      - name: Debug - check if DATABASE_URL is set
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          if [ -z "$DATABASE_URL" ]; then
-            echo "DATABASE_URL is EMPTY or NOT SET"
-          else
-            echo "DATABASE_URL is set, length: ${#DATABASE_URL} characters"
-          fi
-
+      # Step 5: run the tests, with secrets injected as environment variables
       - name: Run tests
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
