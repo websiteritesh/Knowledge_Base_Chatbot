@@ -10,6 +10,7 @@ langchain-text-splitters
 chromadb
 sqlalchemy
 psycopg2-binary
+psycopg[binary]
 rank-bm25
 pytest
 httpx

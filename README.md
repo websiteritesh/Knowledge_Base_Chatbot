@@ -62,7 +62,7 @@ backend/
    ```
 3. Run:
    ```
-   uvicorn main:app --reload
+   uvicorn main:app
    ```
 4. Open `http://127.0.0.1:8000/app`, log in, upload a PDF, and start asking questions.
 
