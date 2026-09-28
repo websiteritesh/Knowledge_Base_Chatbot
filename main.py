@@ -60,6 +60,93 @@ collection = chroma_client.get_or_create_collection(name="documents")
 # no heavy ML dependencies, works everywhere, and is a real hybrid-search technique.
 from rank_bm25 import BM25Okapi
 
+# --- Agent setup (LangGraph) ---
+# This turns retrieval from a single fixed pass into a small loop: retrieve,
+# generate an answer, and if the documents didn't have it, rewrite the
+# question once and try again before giving up — a real agentic decision.
+from langgraph.graph import StateGraph, END
+from typing import TypedDict, List
+
+class AgentState(TypedDict):
+    original_question: str
+    current_query: str
+    attempts: int
+    chunks: List[str]
+    answer: str
+
+NOT_FOUND_MESSAGE = "I don't have information about that in the knowledge base"
+
+def retrieve_node(state: AgentState) -> AgentState:
+    """Vector search + BM25 re-rank, using whatever query is current
+    (the original question on attempt 1, a rewritten version after that)."""
+    results = collection.query(query_texts=[state["current_query"]], n_results=10)
+    candidates = results["documents"][0]
+
+    if not candidates:
+        state["chunks"] = []
+        return state
+
+    tokenized = [c.lower().split() for c in candidates]
+    bm25 = BM25Okapi(tokenized)
+    scores = bm25.get_scores(state["current_query"].lower().split())
+    ranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)
+    state["chunks"] = [chunk for score, chunk in ranked[:4]]
+    return state
+
+def generate_node(state: AgentState) -> AgentState:
+    """Answer using only the retrieved chunks, based on the ORIGINAL question
+    (we search with the rewritten query, but always answer the real question asked)."""
+    context = "\n\n".join(state["chunks"])
+    prompt = f"""You are a helpful knowledge base assistant.
+Answer the question using ONLY the documents below.
+If the answer is not in the documents say: {NOT_FOUND_MESSAGE}
+Be clear and professional.
+
+Documents:
+{context}
+
+Question: {state['original_question']}"""
+
+    response = call_ai_with_retry(prompt)
+    state["answer"] = response.text
+    return state
+
+def rewrite_query_node(state: AgentState) -> AgentState:
+    """The first search didn't find a good answer. Ask the AI to rewrite the
+    question as a better search query — different phrasing, synonyms, or a
+    more specific term — then we'll search again with that instead."""
+    state["attempts"] += 1
+    print(f"[AGENT] No good answer found. Rewriting question: '{state['original_question']}'")
+    rewrite_prompt = f"""A document search for this question found nothing useful:
+"{state['original_question']}"
+
+Rewrite it as a short, alternative search query using different wording or
+synonyms that might match the document's phrasing better. Respond with ONLY
+the rewritten query, nothing else."""
+
+    response = call_ai_with_retry(rewrite_prompt)
+    state["current_query"] = response.text.strip()
+    return state
+
+def should_retry(state: AgentState) -> str:
+    """The decision point: did we find a real answer, or should the agent
+    try once more with a rewritten query before giving up?"""
+    not_found = NOT_FOUND_MESSAGE in state["answer"]
+    if not_found and state["attempts"] < 1:  # allow exactly one retry
+        return "rewrite"
+    return "end"
+
+# Wire the nodes into a graph: retrieve -> generate -> (retry or stop)
+_agent_graph = StateGraph(AgentState)
+_agent_graph.add_node("retrieve", retrieve_node)
+_agent_graph.add_node("generate", generate_node)
+_agent_graph.add_node("rewrite", rewrite_query_node)
+_agent_graph.set_entry_point("retrieve")
+_agent_graph.add_edge("retrieve", "generate")
+_agent_graph.add_conditional_edges("generate", should_retry, {"rewrite": "rewrite", "end": END})
+_agent_graph.add_edge("rewrite", "retrieve")
+rag_agent = _agent_graph.compile()
+
 # --- Authentication setup (JWT) ---
 import bcrypt
 from jose import jwt, JWTError
@@ -218,41 +305,24 @@ def ask(request: QuestionRequest, current_user: str = Depends(verify_token)):
     if collection.count() == 0:
         return {"error": "No documents loaded. Please upload a PDF first."}
 
-    # Step 1: cast a wider net with fast vector search (10 candidates instead of 4)
-    results = collection.query(query_texts=[request.question], n_results=10)
-    candidates = results["documents"][0]
-
-    # Step 2: re-rank those candidates with BM25 — a keyword-relevance algorithm
-    # that catches exact term matches vector search sometimes misses (names, numbers, specific terms)
-    tokenized_candidates = [c.lower().split() for c in candidates]
-    bm25 = BM25Okapi(tokenized_candidates)
-    scores = bm25.get_scores(request.question.lower().split())
-    ranked = sorted(zip(scores, candidates), key=lambda x: x[0], reverse=True)
-    relevant_chunks = [chunk for score, chunk in ranked[:4]]
-
-    context = "\n\n".join(relevant_chunks)
-
-    prompt = f"""You are a helpful knowledge base assistant.
-Answer the question using ONLY the documents below.
-If the answer is not in the documents say: I don't have information about that in the knowledge base.
-Be clear and professional.
-
-Documents:
-{context}
-
-Question: {request.question}"""
-
     try:
-        response = call_ai_with_retry(prompt)
+        result = rag_agent.invoke({
+            "original_question": request.question,
+            "current_query": request.question,
+            "attempts": 0,
+            "chunks": [],
+            "answer": "",
+        })
     except Exception:
         return {"error": "The AI service is temporarily unavailable. Please try again in a minute."}
 
-    answer_text = response.text
+    answer_text = result["answer"]
     source = "documents"
 
-    # Fallback: if the documents didn't have the answer, let the AI answer
-    # from its own general knowledge instead — but clearly label it as such
-    if "I don't have information about that in the knowledge base" in answer_text:
+    # Fallback: if even after the agent's retry the documents didn't have the
+    # answer, let the AI answer from its own general knowledge instead —
+    # but clearly label it as such
+    if NOT_FOUND_MESSAGE in answer_text:
         general_prompt = f"""You are a helpful, knowledgeable AI assistant.
 Answer the following question naturally and helpfully, the way you'd answer in a normal conversation.
 Give enough context and detail to actually be useful — don't just state a bare fact if more explanation would help.
@@ -278,5 +348,6 @@ Question: {request.question}"""
         "question": request.question,
         "answer": answer_text,
         "source": source,
-        "sources_found": len(relevant_chunks)
+        "attempts": result["attempts"] + 1,
+        "sources_found": len(result["chunks"])
     }
