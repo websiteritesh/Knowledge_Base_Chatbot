@@ -38,7 +38,9 @@ backend/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── frontend/
-│   └── index.html        # Login screen + chat UI
+│   └── app.js 
+    └── index.html
+    └── style.css        # Login screen + chat UI
 ├── tests/
 │   └── test_main.py
 ├── documents/            # Uploaded PDFs (not tracked in git)
